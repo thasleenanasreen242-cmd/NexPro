@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Search, ShoppingBag, UserRound, ArrowRight, Truck, ShieldCheck, Headphones, RotateCcw, Smartphone, Laptop, Headphones as AudioIcon, Watch, Gamepad2, Camera, Plus, Check, Menu, Heart, Star } from "lucide-react";
 
 type AuthSession = { access_token: string; user: { id: string; email?: string } };
 type OrderReceipt = { order_number: string; total_amount: number; currency: string };
-import { Search, ShoppingBag, UserRound, ArrowRight, Truck, ShieldCheck, Headphones, RotateCcw, Smartphone, Laptop, Headphones as AudioIcon, Watch, Gamepad2, Camera, Plus, Check, Menu, Heart, Star } from "lucide-react";
 
 type Product = { id: number | string; name: string; description: string; price: number; oldPrice: number; category: string; tag: string; rating: string; kind: "phone" | "laptop" | "buds" | "watch"; imageUrl?: string; stockQuantity?: number };
 type CatalogRow = { id: string; name: string; short_description: string | null; description: string | null; price: number | string; compare_at_price: number | string | null; images: string[] | null; tags: string[] | null; is_featured: boolean; stock_quantity: number; categories: { name?: string } | null };
