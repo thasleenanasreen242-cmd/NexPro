@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, ShoppingBag, UserRound, ArrowRight, Truck, ShieldCheck, Headphones, RotateCcw, Smartphone, Laptop, Headphones as AudioIcon, Watch, Gamepad2, Camera, Plus, Check, Menu, Heart, Star } from "lucide-react";
 
-type Product = { id: number; name: string; description: string; price: number; oldPrice: number; category: string; tag: string; rating: string; kind: "phone" | "laptop" | "buds" | "watch" };
+type Product = { id: number | string; name: string; description: string; price: number; oldPrice: number; category: string; tag: string; rating: string; kind: "phone" | "laptop" | "buds" | "watch"; imageUrl?: string; stockQuantity?: number };
+type CatalogRow = { id: string; name: string; short_description: string | null; description: string | null; price: number | string; compare_at_price: number | string | null; images: string[] | null; tags: string[] | null; is_featured: boolean; stock_quantity: number; categories: { name?: string } | null };
 
-const products: Product[] = [
+const sampleProducts: Product[] = [
   { id: 1, name: "Nova X Pro 5G", description: "256GB · Midnight blue", price: 64999, oldPrice: 72999, category: "Phones", tag: "BESTSELLER", rating: "4.8", kind: "phone" },
   { id: 2, name: "AeroBook Air 14", description: "16GB RAM · 512GB SSD", price: 74990, oldPrice: 82990, category: "Laptops", tag: "NEW ARRIVAL", rating: "4.7", kind: "laptop" },
   { id: 3, name: "Pulse Buds Pro", description: "Active noise cancellation", price: 8999, oldPrice: 11999, category: "Audio", tag: "TOP PICK", rating: "4.6", kind: "buds" },
@@ -35,10 +36,51 @@ function ProductArt({ kind }: { kind: Product["kind"] }) {
 }
 
 export default function HomePage() {
+  const [products, setProducts] = useState<Product[]>(sampleProducts);
+  const [catalogSource, setCatalogSource] = useState<"sample" | "live">("sample");
+  useEffect(() => {
+    let cancelled = false;
+    const loadCatalog = async () => {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+      if (!url || !key) return;
+      try {
+        const response = await fetch(`${url}/rest/v1/products?select=id,name,short_description,description,price,compare_at_price,images,tags,is_featured,stock_quantity,categories(name)&is_active=eq.true&order=created_at.desc`, {
+          headers: { apikey: key, Authorization: `Bearer ${key}` },
+        });
+        if (!response.ok) return;
+        const rows = await response.json() as CatalogRow[];
+        if (cancelled || !Array.isArray(rows) || rows.length === 0) return;
+        setProducts(rows.map((row) => {
+          const categoryName = row.categories?.name ?? "Accessories";
+          const category = categoryName === "Smartphones" ? "Phones" : categoryName;
+          const kind: Product["kind"] = category === "Phones" ? "phone" : category === "Laptops" ? "laptop" : category === "Audio" ? "buds" : "watch";
+          return {
+            id: row.id,
+            name: row.name,
+            description: row.short_description || row.description || categoryName,
+            price: Number(row.price),
+            oldPrice: Number(row.compare_at_price ?? row.price),
+            category,
+            tag: row.is_featured ? "FEATURED" : Number(row.stock_quantity) > 0 ? "IN STOCK" : "SOLD OUT",
+            rating: "",
+            kind,
+            imageUrl: row.images?.[0] || undefined,
+            stockQuantity: Number(row.stock_quantity),
+          };
+        }));
+        setCatalogSource("live");
+      } catch {
+        // Keep the sample catalog visible if the API is not configured or temporarily unavailable.
+      }
+    };
+    void loadCatalog();
+    return () => { cancelled = true; };
+  }, []);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
-  const [cart, setCart] = useState<number[]>([]);
-  const [wishlist, setWishlist] = useState<number[]>([]);
+  const [cart, setCart] = useState<Array<Product["id"]>>([]);
+  const [wishlist, setWishlist] = useState<Array<Product["id"]>>([]);
   const [email, setEmail] = useState("");
   const [subscribed, setSubscribed] = useState(false);
   const [mobileSearch, setMobileSearch] = useState(false);
@@ -118,14 +160,16 @@ export default function HomePage() {
           <div className="promo-art" aria-hidden="true"><div className="promo-device" /><div className="promo-device" /><div className="promo-device" /></div>
         </section>
 
+        {catalogSource === "sample" && <div role="status" style={{ border: "1px solid #f2d6a2", background: "#fffaeb", color: "#7a4b0e", borderRadius: 10, padding: "11px 14px", fontSize: 12, marginTop: 24 }}>Sample catalog preview: add and activate real products in the NexPro Supabase database to display your actual inventory here.</div>}
+
         <section className="section" id="products">
           <div className="section-head"><div><div className="eyebrow">Picked for you</div><h2>{activeCategory === "All" ? "Trending right now" : activeCategory + " collection"}</h2><p>Explore the gear everyone's talking about.</p></div><span className="text-link">{filteredProducts.length} products</span></div>
           <div className="product-grid">
             {filteredProducts.length ? filteredProducts.map((product) => <article className="product-card" key={product.id}>
-              <div className="product-art"><span className="product-tag">{product.tag}</span><ProductArt kind={product.kind} /></div>
-              <div className="product-rating"><Star size={11} fill="currentColor" style={{ verticalAlign: "middle" }} /> {product.rating} <span style={{ color: "#98a2b3" }}> · Customer favourite</span></div>
+              <div className="product-art"><span className="product-tag">{product.tag}</span>{product.imageUrl ? <img src={product.imageUrl} alt={product.name} loading="lazy" style={{ width: "100%", height: 135, objectFit: "contain" }} /> : <ProductArt kind={product.kind} />}</div>
+              {product.rating ? <div className="product-rating"><Star size={11} fill="currentColor" style={{ verticalAlign: "middle" }} /> {product.rating} <span style={{ color: "#98a2b3" }}> · Sample rating</span></div> : <div className="product-rating" style={{ color: "#667085" }}>{product.stockQuantity === 0 ? "Currently out of stock" : "New product"}</div>}
               <h3 className="product-name">{product.name}</h3><p className="product-desc">{product.description}</p>
-              <div className="product-bottom"><div><span className="price">{money(product.price)}</span><span className="old-price">{money(product.oldPrice)}</span></div><button className="add-btn" onClick={() => setCart((old) => [...old, product.id])} aria-label={"Add " + product.name + " to cart"}><Plus size={17} /></button></div>
+              <div className="product-bottom"><div><span className="price">{money(product.price)}</span><span className="old-price">{money(product.oldPrice)}</span></div><button className="add-btn" disabled={product.stockQuantity === 0} onClick={() => setCart((old) => [...old, product.id])} aria-label={"Add " + product.name + " to cart"} title={product.stockQuantity === 0 ? "Out of stock" : "Add to cart"}><Plus size={17} /></button></div>
               <button onClick={() => setWishlist((old) => old.includes(product.id) ? old.filter((id) => id !== product.id) : [...old, product.id])} style={{ marginTop: 12, border: 0, background: "transparent", color: wishlist.includes(product.id) ? "#e04467" : "#98a2b3", padding: 0, fontSize: 10, display: "flex", alignItems: "center", gap: 5 }}><Heart size={12} fill={wishlist.includes(product.id) ? "currentColor" : "none"} /> {wishlist.includes(product.id) ? "Saved to wishlist" : "Add to wishlist"}</button>
             </article>) : <div className="empty-state">No products match your search. Try another keyword or category.</div>}
           </div>
