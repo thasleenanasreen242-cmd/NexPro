@@ -42,6 +42,15 @@ export default function HomePage() {
   const [email, setEmail] = useState("");
   const [subscribed, setSubscribed] = useState(false);
   const [mobileSearch, setMobileSearch] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [orderPlaced, setOrderPlaced] = useState(false);
+  const [customer, setCustomer] = useState({ name: "", email: "", phone: "", address: "", city: "", state: "Kerala", pincode: "" });
+  const [paymentMethod, setPaymentMethod] = useState("cod");
+
+  const cartItems = useMemo(() => products
+    .filter((product) => cart.includes(product.id))
+    .map((product) => ({ ...product, quantity: cart.filter((id) => id === product.id).length })), [cart]);
+  const cartTotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
   const filteredProducts = useMemo(() => products.filter((p) => {
     const matchCategory = activeCategory === "All" || p.category === activeCategory;
@@ -65,7 +74,7 @@ export default function HomePage() {
             <div className="header-actions">
               <button className="icon-action" onClick={() => setMobileSearch(!mobileSearch)} aria-label="Toggle search"><Search size={19} /><span>Search</span></button>
               <button className="icon-action" onClick={() => alert("Your wishlist has " + wishlist.length + " item(s).")} aria-label="Wishlist"><Heart size={19} /><span>Wishlist</span></button>
-              <button className="icon-action" onClick={() => alert(cart.length ? "Your cart contains " + cart.length + " item(s). Checkout will be available soon." : "Your cart is empty. Explore our products!")} aria-label="Shopping cart"><ShoppingBag size={19} /><span>Cart ({cart.length})</span></button>
+              <button className="icon-action" onClick={() => { setOrderPlaced(false); setCheckoutOpen(true); }} aria-label="Open cart and checkout"><ShoppingBag size={19} /><span>Cart ({cart.length})</span></button>
             </div>
           </div>
           {mobileSearch && <div style={{ paddingBottom: 12 }}><label className="search" style={{ display: "flex" }}><Search size={17} /><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search products..." aria-label="Search products" /></label></div>}
@@ -127,6 +136,56 @@ export default function HomePage() {
           <form className="newsletter-form" onSubmit={(e) => { e.preventDefault(); if (email.includes("@") && email.includes(".")) setSubscribed(true); }}><input type="email" required placeholder="Your email address" value={email} onChange={(e) => setEmail(e.target.value)} aria-label="Email address" /><button type="submit">{subscribed ? "You're on the list ✓" : "Sign me up"}</button></form>
         </section>
       </main>
+
+
+      {checkoutOpen && <div role="dialog" aria-modal="true" aria-labelledby="checkout-title" style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(16,24,40,.62)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <div style={{ background: "#fff", borderRadius: 18, width: "min(760px,100%)", maxHeight: "92vh", overflowY: "auto", padding: 24, boxShadow: "0 24px 80px #0003" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 20 }}>
+            <div><div className="eyebrow">NexPro secure checkout demo</div><h2 id="checkout-title" style={{ fontSize: 25, margin: "7px 0 0" }}>{orderPlaced ? "Order request received" : "Your cart & checkout"}</h2></div>
+            <button type="button" onClick={() => setCheckoutOpen(false)} aria-label="Close checkout" style={{ border: "1px solid #e4e7ec", background: "#fff", borderRadius: 9, padding: "8px 12px" }}>Close ✕</button>
+          </div>
+          {orderPlaced ? <div style={{ padding: "22px 0" }}>
+            <div style={{ background: "#ecfdf3", color: "#067647", borderRadius: 12, padding: 16, marginBottom: 16 }}><strong>Thank you, {customer.name}!</strong><p style={{ margin: "8px 0 0", fontSize: 13 }}>Your demo order request has been recorded on this page. No real order, payment, email, or delivery booking has been created.</p></div>
+            <p style={{ fontSize: 13, color: "#667085" }}>Total shown: <strong style={{ color: "#101828" }}>{money(cartTotal)}</strong> · Payment choice: {paymentMethod === "cod" ? "Cash on delivery (demo)" : "UPI / online payment (not connected)"}</p>
+            <button className="primary-btn" onClick={() => { setCheckoutOpen(false); setOrderPlaced(false); }}>Continue shopping <ArrowRight size={16} /></button>
+          </div> : cartItems.length === 0 ? <div style={{ textAlign: "center", padding: "28px 8px" }}>
+            <ShoppingBag size={38} color="#2457e6" style={{ margin: "0 auto 12px" }} /><h3>Your cart is empty</h3><p style={{ color: "#667085", fontSize: 13 }}>Add a product before continuing to checkout.</p>
+            <button className="primary-btn" onClick={() => setCheckoutOpen(false)}>Explore products <ArrowRight size={16} /></button>
+          </div> : <>
+            <div style={{ border: "1px solid #e9edf3", borderRadius: 12, padding: 14, marginBottom: 20 }}>
+              {cartItems.map((item) => <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid #f0f2f5" }}>
+                <div style={{ minWidth: 0 }}><strong style={{ fontSize: 13 }}>{item.name}</strong><div style={{ color: "#667085", fontSize: 12, marginTop: 4 }}>{money(item.price)} × {item.quantity}</div></div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <strong style={{ fontSize: 13 }}>{money(item.price * item.quantity)}</strong>
+                  <button type="button" onClick={() => setCart((old) => { const index = old.indexOf(item.id); return index < 0 ? old : old.filter((_, i) => i !== index); })} aria-label={"Remove one " + item.name} style={{ border: "1px solid #e4e7ec", background: "#fff", borderRadius: 7, padding: "4px 8px", color: "#b42318" }}>−</button>
+                  <button type="button" onClick={() => setCart((old) => [...old, item.id])} aria-label={"Add one " + item.name} style={{ border: "1px solid #e4e7ec", background: "#fff", borderRadius: 7, padding: "4px 8px" }}>+</button>
+                </div>
+              </div>)}
+              <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 14, fontSize: 16 }}><strong>Order total</strong><strong>{money(cartTotal)}</strong></div>
+              <p style={{ color: "#667085", fontSize: 11, marginBottom: 0 }}>Shipping and taxes are not calculated in this demo.</p>
+            </div>
+            <form onSubmit={(e) => { e.preventDefault(); setOrderPlaced(true); setCart([]); }}>
+              <h3 style={{ fontSize: 16, margin: "0 0 12px" }}>Delivery details</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
+                <label style={{ fontSize: 12, color: "#475467" }}>Full name<input required autoComplete="name" value={customer.name} onChange={(e) => setCustomer({ ...customer, name: e.target.value })} placeholder="Your full name" style={{ display: "block", width: "100%", padding: 11, marginTop: 6, border: "1px solid #d0d5dd", borderRadius: 8 }} /></label>
+                <label style={{ fontSize: 12, color: "#475467" }}>Email<input type="email" required autoComplete="email" value={customer.email} onChange={(e) => setCustomer({ ...customer, email: e.target.value })} placeholder="you@example.com" style={{ display: "block", width: "100%", padding: 11, marginTop: 6, border: "1px solid #d0d5dd", borderRadius: 8 }} /></label>
+                <label style={{ fontSize: 12, color: "#475467" }}>Phone number<input required type="tel" autoComplete="tel" pattern="[0-9+() -]{8,16}" value={customer.phone} onChange={(e) => setCustomer({ ...customer, phone: e.target.value })} placeholder="Mobile number" style={{ display: "block", width: "100%", padding: 11, marginTop: 6, border: "1px solid #d0d5dd", borderRadius: 8 }} /></label>
+                <label style={{ fontSize: 12, color: "#475467" }}>PIN code<input required inputMode="numeric" autoComplete="postal-code" pattern="[0-9]{6}" maxLength={6} value={customer.pincode} onChange={(e) => setCustomer({ ...customer, pincode: e.target.value })} placeholder="6-digit PIN code" style={{ display: "block", width: "100%", padding: 11, marginTop: 6, border: "1px solid #d0d5dd", borderRadius: 8 }} /></label>
+                <label style={{ fontSize: 12, color: "#475467", gridColumn: "1 / -1" }}>Delivery address<input required autoComplete="street-address" value={customer.address} onChange={(e) => setCustomer({ ...customer, address: e.target.value })} placeholder="House / street / landmark" style={{ display: "block", width: "100%", padding: 11, marginTop: 6, border: "1px solid #d0d5dd", borderRadius: 8 }} /></label>
+                <label style={{ fontSize: 12, color: "#475467" }}>City / town<input required autoComplete="address-level2" value={customer.city} onChange={(e) => setCustomer({ ...customer, city: e.target.value })} placeholder="City or town" style={{ display: "block", width: "100%", padding: 11, marginTop: 6, border: "1px solid #d0d5dd", borderRadius: 8 }} /></label>
+                <label style={{ fontSize: 12, color: "#475467" }}>State<input required autoComplete="address-level1" value={customer.state} onChange={(e) => setCustomer({ ...customer, state: e.target.value })} style={{ display: "block", width: "100%", padding: 11, marginTop: 6, border: "1px solid #d0d5dd", borderRadius: 8 }} /></label>
+              </div>
+              <h3 style={{ fontSize: 16, margin: "22px 0 10px" }}>Payment preference</h3>
+              <div style={{ display: "grid", gap: 8 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 9, border: "1px solid #e4e7ec", borderRadius: 10, padding: 12, fontSize: 13 }}><input type="radio" name="payment" checked={paymentMethod === "cod"} onChange={() => setPaymentMethod("cod")} /> Cash on delivery <span style={{ color: "#667085", fontSize: 11 }}>(demo only)</span></label>
+                <label style={{ display: "flex", alignItems: "center", gap: 9, border: "1px solid #e4e7ec", borderRadius: 10, padding: 12, fontSize: 13 }}><input type="radio" name="payment" checked={paymentMethod === "online"} onChange={() => setPaymentMethod("online")} /> UPI / online payment <span style={{ color: "#667085", fontSize: 11 }}>(gateway not connected)</span></label>
+              </div>
+              <div style={{ background: "#fffaeb", color: "#93370d", padding: 12, borderRadius: 9, fontSize: 11, lineHeight: 1.6, margin: "16px 0" }}>Demo checkout only: this form does not securely store or transmit an order. Do not enter real personal or payment information. A backend, order database, and payment gateway must be connected before taking real orders.</div>
+              <button type="submit" className="primary-btn" style={{ width: "100%", justifyContent: "center" }}>Place demo order · {money(cartTotal)} <ArrowRight size={16} /></button>
+            </form>
+          </>}
+        </div>
+      </div>}
 
       <footer className="footer" id="footer"><div className="container">
         <div className="footer-top">
