@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+
+type AuthSession = { access_token: string; user: { id: string; email?: string } };
+type OrderReceipt = { order_number: string; total_amount: number; currency: string };
 import { Search, ShoppingBag, UserRound, ArrowRight, Truck, ShieldCheck, Headphones, RotateCcw, Smartphone, Laptop, Headphones as AudioIcon, Watch, Gamepad2, Camera, Plus, Check, Menu, Heart, Star } from "lucide-react";
 
 type Product = { id: number | string; name: string; description: string; price: number; oldPrice: number; category: string; tag: string; rating: string; kind: "phone" | "laptop" | "buds" | "watch"; imageUrl?: string; stockQuantity?: number };
@@ -88,6 +91,128 @@ export default function HomePage() {
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [customer, setCustomer] = useState({ name: "", email: "", phone: "", address: "", city: "", state: "Kerala", pincode: "" });
   const [paymentMethod, setPaymentMethod] = useState("cod");
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
+  const [orderBusy, setOrderBusy] = useState(false);
+  const [orderMessage, setOrderMessage] = useState("");
+  const [orderReceipt, setOrderReceipt] = useState<OrderReceipt | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("nexpro-auth-session");
+      if (saved) {
+        const parsed = JSON.parse(saved) as AuthSession;
+        if (parsed.access_token && parsed.user?.id) setAuthSession(parsed);
+      }
+    } catch {
+      window.localStorage.removeItem("nexpro-auth-session");
+    }
+  }, []);
+
+  const authenticate = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    if (!url || !key) { setAuthMessage("Authentication is not configured yet."); return; }
+    setAuthBusy(true);
+    setAuthMessage("");
+    try {
+      const endpoint = authMode === "signup" ? "signup" : "token?grant_type=password";
+      const response = await fetch(`${url}/auth/v1/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: key },
+        body: JSON.stringify({ email: authEmail.trim(), password: authPassword }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.msg || data.message || data.error_description || "Unable to sign in. Please check your details.");
+      if (!data.access_token || !data.user?.id) {
+        setAuthMessage("Account created. Check your email to confirm your address, then sign in.");
+        setAuthMode("signin");
+        return;
+      }
+      const session: AuthSession = { access_token: data.access_token, user: data.user };
+      window.localStorage.setItem("nexpro-auth-session", JSON.stringify(session));
+      setAuthSession(session);
+      setCustomer((old) => ({ ...old, email: data.user.email || authEmail.trim() }));
+      setAuthOpen(false);
+      setAuthPassword("");
+      setAuthMessage("");
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Authentication failed. Please try again.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const signOut = () => {
+    window.localStorage.removeItem("nexpro-auth-session");
+    setAuthSession(null);
+    setAuthMessage("You have signed out.");
+  };
+
+  const placeOrder = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!authSession) {
+      setAuthMessage("Please sign in or create an account before placing an order.");
+      setAuthOpen(true);
+      return;
+    }
+    if (catalogSource !== "live" || cartItems.some((item) => typeof item.id !== "string")) {
+      setOrderMessage("Checkout is available only for real products loaded from the NexPro database. Sample products are for preview only.");
+      return;
+    }
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    if (!url || !key) { setOrderMessage("Checkout is not configured yet."); return; }
+    setOrderBusy(true);
+    setOrderMessage("");
+    try {
+      const response = await fetch(`${url}/rest/v1/rpc/place_cod_order`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: key,
+          Authorization: `Bearer ${authSession.access_token}`,
+        },
+        body: JSON.stringify({
+          p_customer_name: customer.name,
+          p_customer_email: customer.email,
+          p_customer_phone: customer.phone,
+          p_shipping_address: {
+            recipient_name: customer.name,
+            phone: customer.phone,
+            address_line1: customer.address,
+            city: customer.city,
+            state: customer.state,
+            postal_code: customer.pincode,
+            country: "India",
+          },
+          p_items: cartItems.map((item) => ({ product_id: item.id, quantity: item.quantity })),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (response.status === 401) {
+          signOut();
+          setAuthOpen(true);
+          throw new Error("Your session expired. Please sign in again.");
+        }
+        throw new Error(data.message || data.details || "Order could not be placed. Please review your address and stock.");
+      }
+      setOrderReceipt(data as OrderReceipt);
+      setOrderPlaced(true);
+      setCart([]);
+    } catch (error) {
+      setOrderMessage(error instanceof Error ? error.message : "Order could not be placed. Please try again.");
+    } finally {
+      setOrderBusy(false);
+    }
+  };
 
   const cartItems = useMemo(() => products
     .filter((product) => cart.includes(product.id))
@@ -116,6 +241,7 @@ export default function HomePage() {
             <div className="header-actions">
               <button className="icon-action" onClick={() => setMobileSearch(!mobileSearch)} aria-label="Toggle search"><Search size={19} /><span>Search</span></button>
               <button className="icon-action" onClick={() => alert("Your wishlist has " + wishlist.length + " item(s).")} aria-label="Wishlist"><Heart size={19} /><span>Wishlist</span></button>
+              <button className="icon-action" onClick={() => { setAuthMessage(""); setAuthOpen(true); }} aria-label="Account"><UserRound size={19} /><span>{authSession ? "Account" : "Sign in"}</span></button>
               <button className="icon-action" onClick={() => { setOrderPlaced(false); setCheckoutOpen(true); }} aria-label="Open cart and checkout"><ShoppingBag size={19} /><span>Cart ({cart.length})</span></button>
             </div>
           </div>
@@ -185,12 +311,13 @@ export default function HomePage() {
       {checkoutOpen && <div role="dialog" aria-modal="true" aria-labelledby="checkout-title" style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(16,24,40,.62)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
         <div style={{ background: "#fff", borderRadius: 18, width: "min(760px,100%)", maxHeight: "92vh", overflowY: "auto", padding: 24, boxShadow: "0 24px 80px #0003" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 20 }}>
-            <div><div className="eyebrow">NexPro secure checkout demo</div><h2 id="checkout-title" style={{ fontSize: 25, margin: "7px 0 0" }}>{orderPlaced ? "Order request received" : "Your cart & checkout"}</h2></div>
+            <div><div className="eyebrow">NexPro checkout</div><h2 id="checkout-title" style={{ fontSize: 25, margin: "7px 0 0" }}>{orderPlaced ? "Order confirmed" : "Your cart & checkout"}</h2></div>
             <button type="button" onClick={() => setCheckoutOpen(false)} aria-label="Close checkout" style={{ border: "1px solid #e4e7ec", background: "#fff", borderRadius: 9, padding: "8px 12px" }}>Close ✕</button>
           </div>
           {orderPlaced ? <div style={{ padding: "22px 0" }}>
-            <div style={{ background: "#ecfdf3", color: "#067647", borderRadius: 12, padding: 16, marginBottom: 16 }}><strong>Thank you, {customer.name}!</strong><p style={{ margin: "8px 0 0", fontSize: 13 }}>Your demo order request has been recorded on this page. No real order, payment, email, or delivery booking has been created.</p></div>
-            <p style={{ fontSize: 13, color: "#667085" }}>Total shown: <strong style={{ color: "#101828" }}>{money(cartTotal)}</strong> · Payment choice: {paymentMethod === "cod" ? "Cash on delivery (demo)" : "UPI / online payment (not connected)"}</p>
+            <div style={{ background: "#ecfdf3", color: "#067647", borderRadius: 12, padding: 16, marginBottom: 16 }}><strong>Thank you, {customer.name}!</strong><p style={{ margin: "8px 0 0", fontSize: 13 }}>Your order has been saved to NexPro. Please keep your order number for reference.</p></div>
+            {orderReceipt && <div style={{ border: "1px solid #d0d5dd", borderRadius: 12, padding: 16, marginBottom: 16 }}><div style={{ color: "#667085", fontSize: 12 }}>Order number</div><strong style={{ fontSize: 20 }}>{orderReceipt.order_number}</strong><div style={{ marginTop: 10 }}>Total: <strong>{money(Number(orderReceipt.total_amount))}</strong> · Cash on delivery</div></div>}
+            <p style={{ fontSize: 13, color: "#667085" }}>Payment is due on delivery. Shipping and taxes are not yet calculated.</p>
             <button className="primary-btn" onClick={() => { setCheckoutOpen(false); setOrderPlaced(false); }}>Continue shopping <ArrowRight size={16} /></button>
           </div> : cartItems.length === 0 ? <div style={{ textAlign: "center", padding: "28px 8px" }}>
             <ShoppingBag size={38} color="#2457e6" style={{ margin: "0 auto 12px" }} /><h3>Your cart is empty</h3><p style={{ color: "#667085", fontSize: 13 }}>Add a product before continuing to checkout.</p>
@@ -208,7 +335,7 @@ export default function HomePage() {
               <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 14, fontSize: 16 }}><strong>Order total</strong><strong>{money(cartTotal)}</strong></div>
               <p style={{ color: "#667085", fontSize: 11, marginBottom: 0 }}>Shipping and taxes are not calculated in this demo.</p>
             </div>
-            <form onSubmit={(e) => { e.preventDefault(); setOrderPlaced(true); setCart([]); }}>
+            <form onSubmit={placeOrder}>
               <h3 style={{ fontSize: 16, margin: "0 0 12px" }}>Delivery details</h3>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
                 <label style={{ fontSize: 12, color: "#475467" }}>Full name<input required autoComplete="name" value={customer.name} onChange={(e) => setCustomer({ ...customer, name: e.target.value })} placeholder="Your full name" style={{ display: "block", width: "100%", padding: 11, marginTop: 6, border: "1px solid #d0d5dd", borderRadius: 8 }} /></label>
@@ -219,15 +346,33 @@ export default function HomePage() {
                 <label style={{ fontSize: 12, color: "#475467" }}>City / town<input required autoComplete="address-level2" value={customer.city} onChange={(e) => setCustomer({ ...customer, city: e.target.value })} placeholder="City or town" style={{ display: "block", width: "100%", padding: 11, marginTop: 6, border: "1px solid #d0d5dd", borderRadius: 8 }} /></label>
                 <label style={{ fontSize: 12, color: "#475467" }}>State<input required autoComplete="address-level1" value={customer.state} onChange={(e) => setCustomer({ ...customer, state: e.target.value })} style={{ display: "block", width: "100%", padding: 11, marginTop: 6, border: "1px solid #d0d5dd", borderRadius: 8 }} /></label>
               </div>
-              <h3 style={{ fontSize: 16, margin: "22px 0 10px" }}>Payment preference</h3>
-              <div style={{ display: "grid", gap: 8 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 9, border: "1px solid #e4e7ec", borderRadius: 10, padding: 12, fontSize: 13 }}><input type="radio" name="payment" checked={paymentMethod === "cod"} onChange={() => setPaymentMethod("cod")} /> Cash on delivery <span style={{ color: "#667085", fontSize: 11 }}>(demo only)</span></label>
-                <label style={{ display: "flex", alignItems: "center", gap: 9, border: "1px solid #e4e7ec", borderRadius: 10, padding: 12, fontSize: 13 }}><input type="radio" name="payment" checked={paymentMethod === "online"} onChange={() => setPaymentMethod("online")} /> UPI / online payment <span style={{ color: "#667085", fontSize: 11 }}>(gateway not connected)</span></label>
-              </div>
-              <div style={{ background: "#fffaeb", color: "#93370d", padding: 12, borderRadius: 9, fontSize: 11, lineHeight: 1.6, margin: "16px 0" }}>Demo checkout only: this form does not securely store or transmit an order. Do not enter real personal or payment information. A backend, order database, and payment gateway must be connected before taking real orders.</div>
-              <button type="submit" className="primary-btn" style={{ width: "100%", justifyContent: "center" }}>Place demo order · {money(cartTotal)} <ArrowRight size={16} /></button>
+              <h3 style={{ fontSize: 16, margin: "22px 0 10px" }}>Payment method</h3>
+              <div style={{ display: "grid", gap: 8 }}><label style={{ display: "flex", alignItems: "center", gap: 9, border: "1px solid #e4e7ec", borderRadius: 10, padding: 12, fontSize: 13 }}><input type="radio" name="payment" checked readOnly /> Cash on delivery</label></div>
+              {!authSession && <p style={{ color: "#93370d", background: "#fffaeb", padding: 12, borderRadius: 9, fontSize: 12 }}>Sign in or create an account before placing your order.</p>}
+              {catalogSource !== "live" && <p style={{ color: "#93370d", background: "#fffaeb", padding: 12, borderRadius: 9, fontSize: 12 }}>Sample products cannot be ordered. Add real active products to the Supabase database first.</p>}
+              {orderMessage && <p role="alert" style={{ color: "#b42318", background: "#fef3f2", padding: 12, borderRadius: 9, fontSize: 12 }}>{orderMessage}</p>}
+              <button type="submit" disabled={orderBusy || catalogSource !== "live"} className="primary-btn" style={{ width: "100%", justifyContent: "center", opacity: orderBusy || catalogSource !== "live" ? .65 : 1 }}>{orderBusy ? "Placing order…" : `Place cash-on-delivery order · ${money(cartTotal)}`} <ArrowRight size={16} /></button>
             </form>
           </>}
+        </div>
+      </div>}
+
+      {authOpen && <div role="dialog" aria-modal="true" aria-labelledby="auth-title" style={{ position: "fixed", inset: 0, zIndex: 120, background: "rgba(16,24,40,.62)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <div style={{ background: "#fff", borderRadius: 18, width: "min(440px,100%)", padding: 24, boxShadow: "0 24px 80px #0003" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <div><div className="eyebrow">NexPro customer account</div><h2 id="auth-title" style={{ fontSize: 24, margin: "7px 0 0" }}>{authSession ? "Your account" : authMode === "signup" ? "Create your account" : "Sign in"}</h2></div>
+            <button type="button" onClick={() => setAuthOpen(false)} aria-label="Close account dialog" style={{ border: "1px solid #e4e7ec", background: "#fff", borderRadius: 9, padding: "8px 12px" }}>Close ✕</button>
+          </div>
+          {authSession ? <div style={{ paddingTop: 20 }}>
+            <p style={{ color: "#475467", fontSize: 14 }}>Signed in as <strong>{authSession.user.email}</strong></p>
+            <button className="primary-btn" onClick={() => { signOut(); setAuthOpen(false); }} style={{ justifyContent: "center" }}>Sign out</button>
+          </div> : <form onSubmit={authenticate} style={{ display: "grid", gap: 14, paddingTop: 20 }}>
+            <label style={{ fontSize: 12, color: "#475467" }}>Email address<input type="email" autoComplete="email" required value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="you@example.com" style={{ display: "block", width: "100%", padding: 11, marginTop: 6, border: "1px solid #d0d5dd", borderRadius: 8 }} /></label>
+            <label style={{ fontSize: 12, color: "#475467" }}>Password<input type="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"} minLength={8} required value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="At least 8 characters" style={{ display: "block", width: "100%", padding: 11, marginTop: 6, border: "1px solid #d0d5dd", borderRadius: 8 }} /></label>
+            {authMessage && <p role="status" style={{ color: authMessage.includes("created") || authMessage.includes("confirm") || authMessage.includes("signed out") ? "#067647" : "#b42318", fontSize: 12, margin: 0 }}>{authMessage}</p>}
+            <button type="submit" disabled={authBusy} className="primary-btn" style={{ justifyContent: "center", opacity: authBusy ? .65 : 1 }}>{authBusy ? "Please wait…" : authMode === "signup" ? "Create account" : "Sign in"}</button>
+            <button type="button" onClick={() => { setAuthMode(authMode === "signup" ? "signin" : "signup"); setAuthMessage(""); }} style={{ border: 0, background: "transparent", color: "#2457e6", padding: 8 }}>{authMode === "signup" ? "Already have an account? Sign in" : "New to NexPro? Create an account"}</button>
+          </form>}
         </div>
       </div>}
 
